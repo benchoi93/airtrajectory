@@ -1,0 +1,6 @@
+fig/
+figs/
+*.pkl
+.vscode/
+__pycache__/
+*.pth
