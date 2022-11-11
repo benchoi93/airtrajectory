@@ -168,6 +168,13 @@ for epoch in range(100):
         sample_mae_sum_x += sample_mae_x.item()
         sample_mae_sum_y += sample_mae_y.item()
         sample_mae_sum_z += sample_mae_z.item()
+
+        writer.add_scalar("train_instance/nllloss", nllloss.item(), epoch * train_loader.__len__() + i)
+        writer.add_scalar("train_instance/sample_mae", sample_mae.item(), epoch * train_loader.__len__() + i)
+        writer.add_scalar("train_instance/sample_mae_x", sample_mae_x.item(), epoch * train_loader.__len__() + i)
+        writer.add_scalar("train_instance/sample_mae_y", sample_mae_y.item(), epoch * train_loader.__len__() + i)
+        writer.add_scalar("train_instance/sample_mae_z", sample_mae_z.item(), epoch * train_loader.__len__() + i)
+
         cnt += 1
         pbar.set_description(
             f"Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f} - x {sample_mae_x.item():.4f} y {sample_mae_y.item():.4f} z {sample_mae_z.item():.4f}")
