@@ -53,12 +53,18 @@ class AirportTrajData(object):
 
                 out[out_temp['tod'] - out_temp['tod'].iloc[0], :5] = out_temp[['tod', 'lon', 'lat', 'alt', 'fl']].values
 
+                out[out[:, 4] < 5] = 0
+
                 if (out[:, 0] == 0).sum() / out.shape[0] < 0.1:
 
                     out[:, 1] = interp1d(np.where(out[:, 1] != 0)[0], out[np.where(out[:, 1] != 0)[0], 1],
                                          fill_value="extrapolate")(np.arange(out.shape[0]))
                     out[:, 2] = interp1d(np.where(out[:, 2] != 0)[0], out[np.where(out[:, 2] != 0)[0], 2],
                                          fill_value="extrapolate")(np.arange(out.shape[0]))
+                    out[:, 4] = interp1d(np.where(out[:, 4] != 0)[0], out[np.where(out[:, 4] != 0)[0], 4],
+                                         fill_value="extrapolate")(np.arange(out.shape[0]))
+
+                    # temp.append(out)
 
                     out[1:, -2] = out[1:, 1] - out[:-1, 1]
                     out[1:, -1] = out[1:, 2] - out[:-1, 2]
@@ -72,21 +78,25 @@ class AirportTrajData(object):
 
 
 class MinMaxScaler():
-    def __init__(self, min_x, max_x, min_y, max_y):
+    def __init__(self, min_x, max_x, min_y, max_y, min_z, max_z):
         self.min_x = min_x
         self.max_x = max_x
         self.min_y = min_y
         self.max_y = max_y
+        self.min_z = min_z
+        self.max_z = max_z
 
     def transform(self, x):
         x[:, :, 0] = (x[:, :,  0] - self.min_x) / (self.max_x - self.min_x)
         x[:, :, 1] = (x[:, :, 1] - self.min_y) / (self.max_y - self.min_y)
+        x[:, :, 2] = (x[:, :, 2] - self.min_z) / (self.max_z - self.min_z)
 
         return x
 
     def inverse_transform(self, x):
         x[:, :,  0] = x[:, :,  0] * (self.max_x - self.min_x) + self.min_x
         x[:, :,  1] = x[:, :, 1] * (self.max_y - self.min_y) + self.min_y
+        x[:, :, 2] = x[:, :, 2] * (self.max_z - self.min_z) + self.min_z
 
         return x
 

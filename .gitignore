@@ -4,3 +4,6 @@ figs/
 .vscode/
 __pycache__/
 *.pth
+model/
+log/
+logs/

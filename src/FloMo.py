@@ -26,21 +26,34 @@ class RNN(nn.Module):
 
 class FloMo(nn.Module):
 
-    def __init__(self, hist_size, pred_steps, alpha, beta, gamma, num_in, B=15., momentum=0.2,
-                 use_map=False, interactions=False, rel_coords=True, norm_rotation=False, device=0):
+    def __init__(self, hist_size, pred_steps, alpha, beta, gamma, num_in=2, B=15., momentum=0.2,
+                 use_map=False, interactions=False, rel_coords=True, norm_rotation=False, device=0,
+                 encoding_type="absdev"):
         super().__init__()
         self.pred_steps = pred_steps
-        self.output_size = pred_steps * 2
+        self.output_size = pred_steps * num_in
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
         self.B = B
         self.rel_coords = rel_coords
         self.norm_rotation = norm_rotation
+        self.num_in = num_in
+        # self.num_feat = num_feat
+        self.encoding_type = encoding_type
+
+        if self.encoding_type == "dev":
+            total_input = num_in
+        elif self.encoding_type == "abs":
+            total_input = num_in
+        elif self.encoding_type == "absdev":
+            total_input = num_in * 2
+        else:
+            raise NotImplementedError
 
         # core modules
         self.obs_encoding_size = 16
-        self.obs_encoder = RNN(nin=num_in, nout=self.obs_encoding_size, device=device)
+        self.obs_encoder = RNN(nin=total_input, nout=self.obs_encoding_size, device=device)
         self.flow = NeuralSplineFlow(nin=self.output_size, nc=self.obs_encoding_size, n_layers=10, K=8,
                                      B=self.B, hidden_dim=[32, 32, 32, 32, 32], device=device)
 
@@ -51,6 +64,14 @@ class FloMo(nn.Module):
     def _encode_conditionals(self, x):
         # encode observed trajectory
         x_in = x
+        if self.rel_coords:
+            if self.encoding_type == "dev":
+                x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
+            elif self.encoding_type == "abs":
+                x_in = x[:, 1:]
+            elif self.encoding_type == "absdev":
+                x_in = torch.cat((x[:, 1:], x[:, 1:] - x[:, :-1]), dim=2)
+
         if self.rel_coords:
             x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
         x_enc, hidden = self.obs_encoder(x_in)  # encode relative histories
@@ -129,7 +150,7 @@ class FloMo(nn.Module):
             x_enc = self._encode_conditionals(x)  # history encoding
             x_enc_expanded = self._repeat_rowwise(x_enc, n).view(-1, self.obs_encoding_size)
             n_total = n * x.size(0)
-            output_shape = (x.size(0), n, self.pred_steps, 2)  # predict n trajectories input
+            output_shape = (x.size(0), n, self.pred_steps, self.num_in)  # predict n trajectories input
 
             # sample and compute likelihoods
             z = torch.randn([n_total, self.output_size]).to(self.device)
