@@ -77,6 +77,21 @@ class AirportTrajData(object):
         return temp
 
 
+
+class AirportTrajTestData(AirportTrajData):
+    def __init__(self, path, num_in=60, num_out=60):
+        self.path = path
+
+        with open(self.path, 'rb') as f:
+            self.data = pickle.load(f)
+
+        self.num_in = num_in
+        self.num_out = num_out
+
+        self.test_data = self.data
+        self.test_data = self.list_to_tensor(self.test_data)
+
+
 class MinMaxScaler():
     def __init__(self, min_x, max_x, min_y, max_y, min_z, max_z):
         self.min_x = min_x
@@ -87,16 +102,16 @@ class MinMaxScaler():
         self.max_z = max_z
 
     def transform(self, x):
-        x[:, :, 0] = (x[:, :,  0] - self.min_x) / (self.max_x - self.min_x)
-        x[:, :, 1] = (x[:, :, 1] - self.min_y) / (self.max_y - self.min_y)
-        x[:, :, 2] = (x[:, :, 2] - self.min_z) / (self.max_z - self.min_z)
+        x[..., 0] = (x[...,  0] - self.min_x) / (self.max_x - self.min_x)
+        x[..., 1] = (x[..., 1] - self.min_y) / (self.max_y - self.min_y)
+        x[..., 2] = (x[..., 2] - self.min_z) / (self.max_z - self.min_z)
 
         return x
 
     def inverse_transform(self, x):
-        x[:, :,  0] = x[:, :,  0] * (self.max_x - self.min_x) + self.min_x
-        x[:, :,  1] = x[:, :, 1] * (self.max_y - self.min_y) + self.min_y
-        x[:, :, 2] = x[:, :, 2] * (self.max_z - self.min_z) + self.min_z
+        x[...,  0] = x[...,  0] * (self.max_x - self.min_x) + self.min_x
+        x[...,  1] = x[..., 1] * (self.max_y - self.min_y) + self.min_y
+        x[..., 2] = x[..., 2] * (self.max_z - self.min_z) + self.min_z
 
         return x
 
@@ -108,14 +123,14 @@ class GaussianScaler():
         self.std = np.std(data, axis=(0, 1))
 
     def transform(self, x):
-        x[:, :, 0] = (x[:, :, 0] - self.mean[0]) / self.std[0]
-        x[:, :, 1] = (x[:, :, 1] - self.mean[1]) / self.std[1]
+        x[..., 0] = (x[..., 0] - self.mean[0]) / self.std[0]
+        x[..., 1] = (x[..., 1] - self.mean[1]) / self.std[1]
 
         return x
 
     def inverse_transform(self, x):
-        x[:, :, 0] = x[:, :, 0] * self.std[0] + self.mean[0]
-        x[:, :, 1] = x[:, :, 1] * self.std[1] + self.mean[1]
+        x[..., 0] = x[..., 0] * self.std[0] + self.mean[0]
+        x[..., 1] = x[..., 1] * self.std[1] + self.mean[1]
 
         return x
 

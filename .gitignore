@@ -7,3 +7,5 @@ __pycache__/
 model/
 log/
 logs/
+logs*/
+*.log

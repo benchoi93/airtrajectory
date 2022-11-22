@@ -9,7 +9,7 @@ from src.spline_flow import NeuralSplineFlow, FCN
 class RNN(nn.Module):
     """ GRU based recurrent neural network. """
 
-    def __init__(self, nin, nout, es=16, hs=16, nl=3, device=0):
+    def __init__(self, nin, nout, es=32, hs=32, nl=3, device=0):
         super().__init__()
         self.embedding = nn.Linear(nin, es)
         self.gru = nn.GRU(input_size=es, hidden_size=hs, num_layers=nl, batch_first=True)
@@ -28,7 +28,7 @@ class FloMo(nn.Module):
 
     def __init__(self, hist_size, pred_steps, alpha, beta, gamma, num_in=2, B=15., momentum=0.2,
                  use_map=False, interactions=False, rel_coords=True, norm_rotation=False, device=0,
-                 encoding_type="absdev"):
+                 encoding_type="absdev", hidden = 64):
         super().__init__()
         self.pred_steps = pred_steps
         self.output_size = pred_steps * num_in
@@ -51,11 +51,13 @@ class FloMo(nn.Module):
         else:
             raise NotImplementedError
 
+        self.hidden = hidden
         # core modules
-        self.obs_encoding_size = 16
-        self.obs_encoder = RNN(nin=total_input, nout=self.obs_encoding_size, device=device)
+        self.obs_encoding_size = hidden
+        self.obs_encoder = RNN(nin=total_input, nout=self.obs_encoding_size, device=device,
+                        es = hidden,hs=hidden)
         self.flow = NeuralSplineFlow(nin=self.output_size, nc=self.obs_encoding_size, n_layers=10, K=8,
-                                     B=self.B, hidden_dim=[32, 32, 32, 32, 32], device=device)
+                                     B=self.B, hidden_dim=[hidden, hidden, hidden, hidden, hidden], device=device)
 
         # move model to specified device
         self.device = device
@@ -72,8 +74,8 @@ class FloMo(nn.Module):
             elif self.encoding_type == "absdev":
                 x_in = torch.cat((x[:, 1:], x[:, 1:] - x[:, :-1]), dim=2)
 
-        if self.rel_coords:
-            x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
+        # if self.rel_coords:
+        #     x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
         x_enc, hidden = self.obs_encoder(x_in)  # encode relative histories
         x_enc = x_enc[:, -1]
         x_enc_context = x_enc

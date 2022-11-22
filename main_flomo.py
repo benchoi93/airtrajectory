@@ -10,15 +10,17 @@ import numpy as np
 import sched
 import pickle
 from util import AirportTrajData
+import datetime
 
-# path = './traj.pkl'
+
+# path = '/app/traj.pkl'
 # dataset = AirportTrajData(path, num_in=60, num_out=60)
 
-# with open('./trajdataset3d.pkl', 'wb') as f:
+# with open('/app/trajdataset3d.pkl', 'wb') as f:
 #     pickle.dump(dataset, f)
 
 
-with open('./trajdataset3d.pkl', 'rb') as f:
+with open('/app/trajdataset3d.pkl', 'rb') as f:
     dataset = pickle.load(f)
 
 np.random.seed(0)
@@ -35,7 +37,7 @@ parser.add_argument('--input_length', type=int, default=60)
 parser.add_argument('--emb', type=int, default=128)
 parser.add_argument('--hidden', type=int, default=64)
 parser.add_argument('--alpha', type=float, default=0.01)
-parser.add_argument('--encoding_type', type=str, default="dev", choices=["dev", "abs", "absdev"])
+parser.add_argument('--encoding_type', type=str, default="absdev", choices=["dev", "abs", "absdev"])
 
 arg = parser.parse_args()
 
@@ -101,7 +103,8 @@ norm_model = FloMo(
     beta=0.002,
     gamma=0.002,
     num_in=num_input,
-    encoding_type=encoding_type
+    encoding_type=encoding_type,
+    hidden = hidden,
 )
 
 
@@ -111,7 +114,7 @@ total_loss = []
 
 fig = plt.figure(figsize=(20, 20))
 
-logdir = f"./logs/Flomo_{encoding_type}_input{num_input}_pred{num_pred}_hidden{hidden}_emb{emb}_alpha{alpha}"
+logdir = f"./logs/Flomo_{datetime.datetime.now()}_{encoding_type}_input{num_input}_pred{num_pred}_hidden{hidden}_emb{emb}_alpha{alpha}"
 writer = SummaryWriter(logdir)
 
 # create directory "./model" for saving model
@@ -177,7 +180,7 @@ for epoch in range(100):
 
         cnt += 1
         pbar.set_description(
-            f"Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f} - x {sample_mae_x.item():.4f} y {sample_mae_y.item():.4f} z {sample_mae_z.item():.4f}")
+            f"Train Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f} - x {sample_mae_x.item():.4f} y {sample_mae_y.item():.4f} z {sample_mae_z.item():.4f}")
         # pbar.set_description(f"Epoch {epoch} | Loss {loss.item():.4f} | NLLLoss {nllloss.item():.4f} | MAELoss {mae_loss.item()/N:.4f}")
 
         if i == train_loader.__len__()-1:
@@ -188,7 +191,7 @@ for epoch in range(100):
             writer.add_scalar("train/sample_mae_y", sample_mae_sum_y/cnt, epoch)
             writer.add_scalar("train/sample_mae_z", sample_mae_sum_z/cnt, epoch)
 
-            pbar.set_description(f"Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f}")
+            pbar.set_description(f"Train Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f}")
 
     scheduler.step()
     # save
@@ -200,37 +203,85 @@ for epoch in range(100):
     if not os.path.exists(f"{logdir}/fig/{epoch}"):
         os.makedirs(f"{logdir}/fig/{epoch}")
 
-    for i0, data in enumerate(val_loader):
-        data = data.to(device)
-        input = data[:, :input_length, [1, 2, 4]]
-        target = data[:, input_length:, [1, 2, 4]]
 
-        input = scaler.transform(input)
-        target = scaler.transform(target)
+    losses = 0
+    sample_mae_sum = 0
+    sample_mae_sum_x = 0
+    sample_mae_sum_y = 0
+    sample_mae_sum_z = 0
+    cnt = 0
 
-        for j in range(30):
-            samples, log_prob = norm_model.sample(n=N*10, x=input[j].unsqueeze(0))
-            _, idx = torch.topk(log_prob, k=N)
-            samples = samples[:, idx[0], :, :]
+    best_performance = 100000
 
-            input_i = scaler.inverse_transform(input[j].unsqueeze(0))
-            target_i = scaler.inverse_transform(target[j].unsqueeze(0))
-            samples = scaler.inverse_transform(samples[0])
+    with torch.no_grad():
+        for i, data in (pbar:=tqdm(enumerate(val_loader), total = val_loader.__len__()) ):
+            data = data.to(device)
+            input = data[:, :input_length, [1, 2, 4]]
+            target = data[:, input_length:, [1, 2, 4]]
 
-            input_i = input_i.cpu().numpy()
-            target_i = target_i.cpu().numpy()
-            samples = samples.cpu().numpy()
+            input = scaler.transform(input)
+            target = scaler.transform(target)
 
-            ax = fig.add_subplot(projection='3d')
-            ax.scatter(input_i[:, :, 0], input_i[:, :, 1], input_i[:, :, 2], c='r', s=1)
-            ax.scatter(target_i[:, :, 0], target_i[:, :, 1], target_i[:, :, 2], c='b', s=1)
+            nllloss = norm_model.log_prob(target, input)
 
-            for k in range(N):
-                ax.scatter(samples[k, :, 0], samples[k, :, 1], samples[k, :, 2], c='g', s=1, alpha=5/N)
+            samples, probs = norm_model.sample(n=10, x=input)
+            sample_mae = (samples - target.unsqueeze(1)).abs()
+            sample_mae_x = sample_mae[:, :, :, 0].mean()
+            sample_mae_y = sample_mae[:, :, :, 1].mean()
+            sample_mae_z = sample_mae[:, :, :, 2].mean()
+            sample_mae = sample_mae.mean()
 
-            ax.set_xlim([min_x, max_x])
-            ax.set_ylim([min_y, max_y])
-            # ax.set_zlim([min_z, max_z])
+            nllloss = -nllloss.mean()
+            loss = nllloss
 
-            ax.get_figure().savefig(f"{logdir}/fig/{epoch}/{i0}_{j}.png")
-        break
+            losses += loss.item()
+            sample_mae_sum += sample_mae.item()
+            sample_mae_sum_x += sample_mae_x.item()
+            sample_mae_sum_y += sample_mae_y.item()
+            sample_mae_sum_z += sample_mae_z.item()
+
+            cnt += 1
+            pbar.set_description(
+                f"Val Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f} - x {sample_mae_x.item():.4f} y {sample_mae_y.item():.4f} z {sample_mae_z.item():.4f}")
+
+            if i == val_loader.__len__()-1:
+                total_loss.append(losses/cnt)
+                writer.add_scalar("val/loss", losses/cnt, epoch)
+                writer.add_scalar("val/sample_mae", sample_mae_sum/cnt, epoch)
+                writer.add_scalar("val/sample_mae_x", sample_mae_sum_x/cnt, epoch)
+                writer.add_scalar("val/sample_mae_y", sample_mae_sum_y/cnt, epoch)
+                writer.add_scalar("val/sample_mae_z", sample_mae_sum_z/cnt, epoch)
+
+                pbar.set_description(f"Val Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f}")
+
+                if best_performance > losses/cnt:
+                    best_performance = losses/cnt
+                    torch.save(norm_model.state_dict(), f"{logdir}/model/model_best.pt")
+
+
+            # if i == 0:
+            #     for j in range(30):
+            #         samples, log_prob = norm_model.sample(n=N*10, x=input[j].unsqueeze(0))
+            #         _, idx = torch.topk(log_prob, k=N)
+            #         samples = samples[:, idx[0], :, :]
+
+            #         input_i = scaler.inverse_transform(input[j].unsqueeze(0))
+            #         target_i = scaler.inverse_transform(target[j].unsqueeze(0))
+            #         samples = scaler.inverse_transform(samples[0])
+
+            #         input_i = input_i.cpu().numpy()
+            #         target_i = target_i.cpu().numpy()
+            #         samples = samples.cpu().numpy()
+
+            #         ax = fig.add_subplot(projection='3d')
+            #         ax.scatter(input_i[:, :, 0], input_i[:, :, 1], input_i[:, :, 2], c='r', s=1)
+            #         ax.scatter(target_i[:, :, 0], target_i[:, :, 1], target_i[:, :, 2], c='b', s=1)
+
+            #         for k in range(N):
+            #             ax.scatter(samples[k, :, 0], samples[k, :, 1], samples[k, :, 2], c='g', s=1, alpha=5/N)
+
+            #         ax.set_xlim([min_x, max_x])
+            #         ax.set_ylim([min_y, max_y])
+            #         # ax.set_zlim([min_z, max_z])
+
+            #         ax.get_figure().savefig(f"{logdir}/fig/{epoch}/{i}_{j}.png")
