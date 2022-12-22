@@ -1,3 +1,4 @@
+import sys
 from tensorboardX import SummaryWriter
 import argparse
 import os
@@ -12,20 +13,22 @@ import pickle
 from util import AirportTrajTestData, AirportTrajData
 import datetime
 
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
-
-# path = '/app/traj0530.pkl'
+# path = '/app/result/result0530.pkl'
 # dataset = AirportTrajTestData(path, num_in=60, num_out=60)
 
 # with open('/app/trajdataset3d0530.pkl', 'wb') as f:
 #     pickle.dump(dataset, f)
 
+# with open(f"/app/logs/{dir}/")
 
 with open('/app/trajdataset3d0530.pkl', 'rb') as f:
-    dataset:AirportTrajTestData = pickle.load(f)
+    dataset: AirportTrajTestData = pickle.load(f)
 
 with open('/app/trajdataset3d.pkl', 'rb') as f:
-    traindataset:AirportTrajData = pickle.load(f)
+    traindataset: AirportTrajData = pickle.load(f)
 
 
 np.random.seed(0)
@@ -34,16 +37,17 @@ torch.manual_seed(0)
 # [x.shape for x in dataset.test_data]
 # len(dataset.test_data)
 
-import sys
-sys.argv= ['']
+sys.argv = ['']
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--batch_size', type=int, default=256)
+parser.add_argument('--batch_size', type=int, default=64)
 
 arg = parser.parse_args()
 
-model_dir = "Flomo_2022-11-13 15:13:47.408616_absdev_input3_pred60_hidden64_emb128_alpha0.01"
-model,time, encoding_type, input,pred,hidden,emb,alpha= model_dir.split("_")
+# model_dir = "Flomo_2022-12-21 23:52:46.266385_dev_input3_pred60_hidden64_emb128_alpha0.01"
+# model_dir = "Flomo_2022-12-21 23:52:46.298609_abs_input3_pred60_hidden64_emb128_alpha0.01"
+model_dir = "Flomo_2022-12-21 23:52:48.239456_absdev_input3_pred60_hidden64_emb128_alpha0.01"
+model, time, encoding_type, input, pred, hidden, emb, alpha = model_dir.split("_")
 
 batch_size = arg.batch_size
 num_input = int(input.split("input")[1])
@@ -101,7 +105,7 @@ norm_model = FloMo(
     gamma=0.002,
     num_in=num_input,
     encoding_type=encoding_type,
-    hidden = hidden,
+    hidden=hidden,
 )
 
 norm_model.load_state_dict(torch.load(f"/app/logs/{model_dir}/model/model_best.pt"))
@@ -127,3 +131,45 @@ with torch.no_grad():
 
         nllloss = -nllloss.mean()
         loss = nllloss
+
+        input = scaler.inverse_transform(input)
+        samples = scaler.inverse_transform(samples)
+        target = scaler.inverse_transform(target)
+
+        out_dict = {
+            "data": data.cpu().numpy(),
+            "input": input.cpu().numpy(),
+            "target": target.cpu().numpy(),
+            "samples": samples.cpu().numpy(),
+        }
+
+        if not os.path.exists(f"/app/logs/{model_dir}/result"):
+            os.makedirs(f"/app/logs/{model_dir}/result")
+
+        with open(f"/app/logs/{model_dir}/result/{i}.pkl", 'wb') as f:
+            pickle.dump(out_dict, f)
+
+        for j in range(input.shape[0]):
+            samples, log_prob = norm_model.sample(n=100, x=input[j].unsqueeze(0))
+            # sort by log_prob
+
+            input_i = scaler.inverse_transform(input[j].unsqueeze(0))
+            target_i = scaler.inverse_transform(target[j].unsqueeze(0))
+            samples = scaler.inverse_transform(samples[0])
+
+            input_i = input_i.cpu().numpy()
+            target_i = target_i.cpu().numpy()
+            samples = samples.cpu().numpy()
+
+            ax = fig.add_subplot(projection='3d')
+            ax.scatter(input_i[:, :, 0], input_i[:, :, 1], input_i[:, :, 2], c='r', s=1)
+            ax.scatter(target_i[:, :, 0], target_i[:, :, 1], target_i[:, :, 2], c='b', s=1)
+
+            for k in range(N):
+                ax.scatter(samples[k, :, 0], samples[k, :, 1], samples[k, :, 2], c='g', s=1, alpha=5/N)
+
+            ax.set_xlim([min_x, max_x])
+            ax.set_ylim([min_y, max_y])
+            # ax.set_zlim([min_z, max_z])
+
+            ax.get_figure().savefig(f"{logdir}/fig/{epoch}/{i}_{j}.png")

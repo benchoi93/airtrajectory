@@ -4,7 +4,7 @@ import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from util import MinMaxScaler, GaussianScaler
-from src.FloMo import FloMo
+from src.FloMoMDN import FloMo
 import torch
 import numpy as np
 import sched
@@ -38,6 +38,7 @@ parser.add_argument('--emb', type=int, default=128)
 parser.add_argument('--hidden', type=int, default=64)
 parser.add_argument('--alpha', type=float, default=0.01)
 parser.add_argument('--encoding_type', type=str, default="absdev", choices=["dev", "abs", "absdev"])
+parser.add_argument('--n_components', type=int, default=5)
 
 arg = parser.parse_args()
 
@@ -50,7 +51,7 @@ emb = arg.emb
 hidden = arg.hidden
 alpha = arg.alpha
 encoding_type = arg.encoding_type
-
+n_components = arg.n_components
 # num_input = 3
 # num_features = 3
 # num_pred = 60
@@ -105,6 +106,7 @@ norm_model = FloMo(
     num_in=num_input,
     encoding_type=encoding_type,
     hidden=hidden,
+    n_components=n_components
 )
 
 
@@ -114,7 +116,7 @@ total_loss = []
 
 fig = plt.figure(figsize=(20, 20))
 
-logdir = f"./logs/Flomo_{datetime.datetime.now()}_{encoding_type}_input{num_input}_pred{num_pred}_hidden{hidden}_emb{emb}_alpha{alpha}"
+logdir = f"./logs/MDN_{datetime.datetime.now()}_{encoding_type}_input{num_input}_pred{num_pred}_hidden{hidden}_emb{emb}_alpha{alpha}_ncomp{n_components}"
 writer = SummaryWriter(logdir)
 
 # create directory "./model" for saving model
@@ -123,7 +125,7 @@ if not os.path.exists(f"{logdir}/model"):
 if not os.path.exists(f"{logdir}/fig"):
     os.makedirs(f"{logdir}/fig")
 
-for epoch in range(1000):
+for epoch in range(100):
     norm_model.train()
 
     losses = 0
@@ -136,62 +138,31 @@ for epoch in range(1000):
         optim.zero_grad()
         data = data.to(device)
         input = data[:, :input_length, [1, 2, 4]]
-        # features = data[:, :input_length, [0, 5, 6]]
         target = data[:, input_length:, [1, 2, 4]]
 
         input = scaler.transform(input)
         target = scaler.transform(target)
-        # features[:, :, 0] = features[:, :, 0] / (24*60*60)
-        # features[:, :, 1:] = gaussian_scaler.transform(features[:, :, 1:])
 
-        # add small noise to target
-        # target = [target + torch.randn_like(target) * 0.0005 for _ in range(5)]
-        # target = torch.concat(target, 0)
-        # input = input.repeat(5, 1, 1)
-        # features = features.repeat(5, 1, 1)
+        log_prob, sigma_reg = norm_model.log_prob(target, input)
 
-        nllloss = norm_model.log_prob(target, input)
-
-        with torch.no_grad():
-            samples, probs = norm_model.sample(n=10, x=input)
-            sample_mae = (samples - target.unsqueeze(1)).abs()
-            sample_mae_x = sample_mae[:, :, :, 0].mean()
-            sample_mae_y = sample_mae[:, :, :, 1].mean()
-            sample_mae_z = sample_mae[:, :, :, 2].mean()
-            sample_mae = sample_mae.mean()
-
-        nllloss = -nllloss.mean()
-        # loss = alpha * nllloss + (1-alpha) * mae_loss
-        loss = nllloss
+        nllloss = -log_prob.mean()
+        loss = nllloss + sigma_reg
 
         loss.backward()
         optim.step()
         losses += loss.item()
-        sample_mae_sum += sample_mae.item()
-        sample_mae_sum_x += sample_mae_x.item()
-        sample_mae_sum_y += sample_mae_y.item()
-        sample_mae_sum_z += sample_mae_z.item()
 
         writer.add_scalar("train_instance/nllloss", nllloss.item(), epoch * train_loader.__len__() + i)
-        writer.add_scalar("train_instance/sample_mae", sample_mae.item(), epoch * train_loader.__len__() + i)
-        writer.add_scalar("train_instance/sample_mae_x", sample_mae_x.item(), epoch * train_loader.__len__() + i)
-        writer.add_scalar("train_instance/sample_mae_y", sample_mae_y.item(), epoch * train_loader.__len__() + i)
-        writer.add_scalar("train_instance/sample_mae_z", sample_mae_z.item(), epoch * train_loader.__len__() + i)
 
         cnt += 1
         pbar.set_description(
-            f"Train Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f} - x {sample_mae_x.item():.4f} y {sample_mae_y.item():.4f} z {sample_mae_z.item():.4f}")
-        # pbar.set_description(f"Epoch {epoch} | Loss {loss.item():.4f} | NLLLoss {nllloss.item():.4f} | MAELoss {mae_loss.item()/N:.4f}")
+            f"Train Epoch {epoch} | Loss {loss.item():.4f} | NLLLoss {nllloss.item():.4f} | SigmaReg {sigma_reg.item():.4f}")
 
         if i == train_loader.__len__()-1:
             total_loss.append(losses/cnt)
             writer.add_scalar("train/loss", losses/cnt, epoch)
-            writer.add_scalar("train/sample_mae", sample_mae_sum/cnt, epoch)
-            writer.add_scalar("train/sample_mae_x", sample_mae_sum_x/cnt, epoch)
-            writer.add_scalar("train/sample_mae_y", sample_mae_sum_y/cnt, epoch)
-            writer.add_scalar("train/sample_mae_z", sample_mae_sum_z/cnt, epoch)
 
-            pbar.set_description(f"Train Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f}")
+            pbar.set_description(f"Train Epoch {epoch} | Loss {loss.item():.4f} | NLLLoss {nllloss.item():.4f} | SigmaReg {sigma_reg.item():.4f} ")
 
     scheduler.step()
     # save
@@ -223,63 +194,88 @@ for epoch in range(1000):
 
             nllloss = norm_model.log_prob(target, input)
 
-            samples, probs = norm_model.sample(n=10, x=input)
-            sample_mae = (samples - target.unsqueeze(1)).abs()
-            sample_mae_x = sample_mae[:, :, :, 0].mean()
-            sample_mae_y = sample_mae[:, :, :, 1].mean()
-            sample_mae_z = sample_mae[:, :, :, 2].mean()
-            sample_mae = sample_mae.mean()
+            log_prob, sigma_reg = norm_model.log_prob(target, input)
 
-            nllloss = -nllloss.mean()
-            loss = nllloss
+            nllloss = -log_prob.mean()
+            loss = nllloss + sigma_reg
 
             losses += loss.item()
-            sample_mae_sum += sample_mae.item()
-            sample_mae_sum_x += sample_mae_x.item()
-            sample_mae_sum_y += sample_mae_y.item()
-            sample_mae_sum_z += sample_mae_z.item()
 
             cnt += 1
             pbar.set_description(
-                f"Val Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f} - x {sample_mae_x.item():.4f} y {sample_mae_y.item():.4f} z {sample_mae_z.item():.4f}")
+                f"Val Epoch {epoch} | Loss {loss.item():.4f} | NLLLoss {nllloss.item():.4f} | SigmaReg {sigma_reg.item():.4f}")
 
             if i == val_loader.__len__()-1:
                 total_loss.append(losses/cnt)
                 writer.add_scalar("val/loss", losses/cnt, epoch)
-                writer.add_scalar("val/sample_mae", sample_mae_sum/cnt, epoch)
-                writer.add_scalar("val/sample_mae_x", sample_mae_sum_x/cnt, epoch)
-                writer.add_scalar("val/sample_mae_y", sample_mae_sum_y/cnt, epoch)
-                writer.add_scalar("val/sample_mae_z", sample_mae_sum_z/cnt, epoch)
 
-                pbar.set_description(f"Val Epoch {epoch} | Loss {loss.item():.4f} | MAE {sample_mae.item():.4f}")
+                pbar.set_description(f"Val Epoch {epoch} | Loss {loss.item():.4f} | NLLLoss {nllloss.item():.4f} | SigmaReg {sigma_reg.item():.4f}")
 
                 if best_performance > losses/cnt:
                     best_performance = losses/cnt
                     torch.save(norm_model.state_dict(), f"{logdir}/model/model_best.pt")
 
-            # if i == 0:
-            #     for j in range(30):
-            #         samples, log_prob = norm_model.sample(n=N*10, x=input[j].unsqueeze(0))
-            #         _, idx = torch.topk(log_prob, k=N)
-            #         samples = samples[:, idx[0], :, :]
 
-            #         input_i = scaler.inverse_transform(input[j].unsqueeze(0))
-            #         target_i = scaler.inverse_transform(target[j].unsqueeze(0))
-            #         samples = scaler.inverse_transform(samples[0])
+performance = np.zeros((len(test_loader) * batch_size, 12))
+cnt = 0
+with torch.no_grad():
+    for i, data in (pbar := tqdm(enumerate(test_loader), total=test_loader.__len__())):
+        data = data.to(device)
+        input = data[:, :input_length, [1, 2, 4]]
+        target = data[:, input_length:, [1, 2, 4]]
 
-            #         input_i = input_i.cpu().numpy()
-            #         target_i = target_i.cpu().numpy()
-            #         samples = samples.cpu().numpy()
+        input = scaler.transform(input)
+        target = scaler.transform(target)
 
-            #         ax = fig.add_subplot(projection='3d')
-            #         ax.scatter(input_i[:, :, 0], input_i[:, :, 1], input_i[:, :, 2], c='r', s=1)
-            #         ax.scatter(target_i[:, :, 0], target_i[:, :, 1], target_i[:, :, 2], c='b', s=1)
+        mu, sigma, log_w = norm_model.predict(input)
 
-            #         for k in range(N):
-            #             ax.scatter(samples[k, :, 0], samples[k, :, 1], samples[k, :, 2], c='g', s=1, alpha=5/N)
+        mix_dist = torch.distributions.MixtureSameFamily(
+            mixture_distribution=torch.distributions.Categorical(logits=log_w),
+            component_distribution=torch.distributions.independent.Independent(
+                torch.distributions.Normal(
+                    loc=mu, scale=sigma
+                ), 1
+            )
+        )
 
-            #         ax.set_xlim([min_x, max_x])
-            #         ax.set_ylim([min_y, max_y])
-            #         # ax.set_zlim([min_z, max_z])
+        # samples = [mix_dist.sample() for i in range(100)]
+        # samples = torch.stack(samples, 1)
+        # samples = samples.reshape(-1, 100, num_pred, 3)
+        samples = mix_dist.sample((100,))
+        samples = samples.view(-1, 100, num_pred, 3)
+        samples = scaler.inverse_transform(samples)
 
-            #         ax.get_figure().savefig(f"{logdir}/fig/{epoch}/{i}_{j}.png")
+        target = scaler.inverse_transform(target)
+
+        # calculate minADE
+        dlon = torch.deg2rad(samples[:, :, :, 0]) - torch.deg2rad(target[:, :, 0].unsqueeze(1))
+        dlat = torch.deg2rad(samples[:, :, :, 1]) - torch.deg2rad(target[:, :, 1].unsqueeze(1))
+
+        a = torch.sin(dlat / 2)**2 + torch.cos(torch.deg2rad(target[:, :, 1].unsqueeze(1))) * \
+            torch.cos(torch.deg2rad(samples[:, :, :, 1])) * torch.sin(dlon / 2)**2
+        c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
+
+        dist_xy = 6371 * c
+        dz = samples[:, :, :, 2] - target[:, :, 2].unsqueeze(1)
+        dalt = dz * 1000 * 0.3048
+
+        dist = torch.sqrt(dist_xy**2 + dalt**2)
+
+        performance[(cnt):(cnt+samples.shape[0]), 0] = dist.mean(-1).min(-1)[0].cpu().numpy()
+        performance[(cnt):(cnt+samples.shape[0]), 1] = dist.mean(-1).max(-1)[0].cpu().numpy()
+        performance[(cnt):(cnt+samples.shape[0]), 2] = dist.mean(-1).mean(-1).cpu().numpy()
+
+        # calculate minFDE
+        performance[(cnt):(cnt+samples.shape[0]), 3] = dist[..., -1].min(-1)[0].cpu().numpy()
+        performance[(cnt):(cnt+samples.shape[0]), 4] = dist[..., -1].max(-1)[0].cpu().numpy()
+        performance[(cnt):(cnt+samples.shape[0]), 5] = dist[..., -1].mean(-1).cpu().numpy()
+
+        cnt += samples.shape[0]
+
+print(f"minADE: {performance[:, 0].mean():.4f}")
+print(f"maxADE: {performance[:, 1].mean():.4f}")
+print(f"meanADE: {performance[:, 2].mean():.4f}")
+
+print(f"minFDE: {performance[:, 3].mean():.4f}")
+print(f"maxFDE: {performance[:, 4].mean():.4f}")
+print(f"meanFDE: {performance[:, 5].mean():.4f}")

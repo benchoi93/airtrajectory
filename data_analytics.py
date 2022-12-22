@@ -94,6 +94,9 @@ for i0 in range(len(data_folder_original)):
                 cnt += 1
             prev_t = t
 
+        if cnt >= obs_len:
+            result.append(df_tid2.iloc[(i-cnt+1):(i)])
+
         pbar.set_description(f"tid: {tid}, len: {len(result)}")
 
 
@@ -101,8 +104,18 @@ for i0 in range(len(data_folder_original)):
         pickle.dump(result, f)
 
 
+    print(len(result)) 
 
+import pickle
+import os
+listfiles = os.listdir("/app/result")
+traj = []
+for i in range(len(listfiles)):
+    with open("/app/result/"+listfiles[i], 'rb') as f:
+        traj += pickle.load(f)
 
+with open("/app/traj.pkl", 'wb') as f:
+    pickle.dump(traj, f)
 
 
     # result2 = [x for x in result if len(x) > 120]

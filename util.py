@@ -43,7 +43,9 @@ class AirportTrajData(object):
         # iterate through data
         # and generate trajectory with length (num_in + num_out)
 
-        for i in tqdm(range(len(data))):
+        cnt = 0
+        errcnt = 0
+        for i in (pbar := tqdm(range(len(data)))):
             # iterate through each trajectory
             for j in range(len(data[i]) - (self.num_in + self.num_out)):
                 out = np.zeros((self.num_in + self.num_out+1, 7))
@@ -53,7 +55,7 @@ class AirportTrajData(object):
 
                 out[out_temp['tod'] - out_temp['tod'].iloc[0], :5] = out_temp[['tod', 'lon', 'lat', 'alt', 'fl']].values
 
-                out[out[:, 4] < 5] = 0
+                out[out[:, 4] < 5, 0] = 0
 
                 if (out[:, 0] == 0).sum() / out.shape[0] < 0.1:
 
@@ -71,11 +73,14 @@ class AirportTrajData(object):
 
                     out = out[1:, :]
 
-                    assert(np.all(out[:, 1] != 0))
+                    assert (np.all(out[:, 1] != 0))
                     temp.append(out)
+                else:
+                    errcnt += 1
+                cnt += 1
+                pbar.set_description(f"total case : {cnt}, error case : {errcnt}, ok case : {cnt - errcnt}")
 
         return temp
-
 
 
 class AirportTrajTestData(AirportTrajData):
