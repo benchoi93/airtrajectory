@@ -90,8 +90,8 @@ class FloMo(nn.Module):
             nn.ReLU(),
             nn.Linear(self.obs_encoding_size, self.obs_encoding_size),
             nn.ReLU(),
-            nn.Linear(self.obs_encoding_size, self.num_in),
-            # nn.Linear(self.obs_encoding_size, self.output_size),
+            # nn.Linear(self.obs_encoding_size, self.num_in),
+            nn.Linear(self.obs_encoding_size, self.output_size),
         )
 
         # move model to specified device
@@ -103,12 +103,12 @@ class FloMo(nn.Module):
         x_in = x
         if self.rel_coords:
             if self.encoding_type == "dev":
-                x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
+                x_in = x[:, :, 3:]
             elif self.encoding_type == "abs":
-                x_in = x[:, 1:]
+                x_in = x[:, :, :3]
             elif self.encoding_type == "absdev":
-                x_in = torch.cat((x[:, 1:], x[:, 1:] - x[:, :-1]), dim=2)
-
+                x_in = x
+                
         # if self.rel_coords:
         #     x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
         x_enc, hidden = self.obs_encoder(x_in)  # encode relative histories
@@ -154,7 +154,7 @@ class FloMo(nn.Module):
         if self.norm_rotation:
             x, y_true, angle = self._normalize_rotation(x, y_true)
 
-        x_t = x[..., -1:, :]
+        x_t = x[..., -1:, :3]
         x_enc = self._encode_conditionals(x)  # history encoding
         y_rel = self._abs_to_rel(y_true, x_t)
         y_rel_flat = torch.flatten(y_rel, start_dim=1)
@@ -196,7 +196,7 @@ class FloMo(nn.Module):
             normal = Normal(0, 1, validate_args=True)
             log_probs = (normal.log_prob(z).sum(1) - log_det).view((x.size(0), -1))
 
-            x_t = x[..., -1:, :].unsqueeze(dim=1).repeat(1, n, 1, 1)
+            x_t = x[..., -1:, :3].unsqueeze(dim=1).repeat(1, n, 1, 1)
             samples_abs = self._rel_to_abs(samples_rel, x_t)
 
             # invert rotation normalization
@@ -211,31 +211,31 @@ class FloMo(nn.Module):
     def log_prob(self, y_true, x):
         y_pred = self.predict(x)
 
-        mse = torch.mean((y_true - y_pred).abs())
+        mae = torch.mean((y_true - y_pred).abs())
 
-        return -mse
+        return -mae
 
     def predict(self, x):
         if self.norm_rotation:
             x, y_true, angle = self._normalize_rotation(x, y_true)
 
-        x_t = x[..., -1:, :]
+        x_t = x[..., -1:, :3]
         x_enc, prev_hidden = self._encode_conditionals(x)  # history encoding
 
         targets = []
         y_pred_t = self.mlp(x_enc)
-        # targets = y_pred_t.view(-1, self.pred_steps, self.num_in)
+        targets = y_pred_t.view(-1, self.pred_steps, self.num_in)
         # y_pred = y_pred.view(-1, self.pred_steps, self.num_in)
 
-        prev_output = y_pred_t.unsqueeze(1)
-        # prev_hidden = x_enc
-        for t in range(self.pred_steps):
-            prev_x, prev_hidden = self.pred_decoder(prev_output, prev_hidden)
+        # prev_output = y_pred_t.unsqueeze(1)
+        # # prev_hidden = x_enc
+        # for t in range(self.pred_steps):
+        #     prev_x, prev_hidden = self.pred_decoder(prev_output, prev_hidden)
 
-            prev_output = prev_x
+        #     prev_output = prev_x
 
-            targets.append(prev_x)
+        #     targets.append(prev_x)
 
-        targets = torch.concat(targets, dim=1)
+        # targets = torch.concat(targets, dim=1)
 
         return targets

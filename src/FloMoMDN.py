@@ -226,7 +226,7 @@ class FloMo(nn.Module):
         mu = y_pred[..., 0]
         sigma = y_pred[..., 1]
 
-        mu = torch.sigmoid(mu)
+        mu = mu
         sigma = torch.exp(sigma)
 
         w = self.mlp_w(x_enc)

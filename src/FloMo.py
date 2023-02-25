@@ -28,7 +28,7 @@ class FloMo(nn.Module):
 
     def __init__(self, hist_size, pred_steps, alpha, beta, gamma, num_in=2, B=15., momentum=0.2,
                  use_map=False, interactions=False, rel_coords=True, norm_rotation=False, device=0,
-                 encoding_type="absdev", hidden = 64):
+                 encoding_type="absdev", hidden=64):
         super().__init__()
         self.pred_steps = pred_steps
         self.output_size = pred_steps * num_in
@@ -55,7 +55,7 @@ class FloMo(nn.Module):
         # core modules
         self.obs_encoding_size = hidden
         self.obs_encoder = RNN(nin=total_input, nout=self.obs_encoding_size, device=device,
-                        es = hidden,hs=hidden)
+                               es=hidden, hs=hidden)
         self.flow = NeuralSplineFlow(nin=self.output_size, nc=self.obs_encoding_size, n_layers=10, K=8,
                                      B=self.B, hidden_dim=[hidden, hidden, hidden, hidden, hidden], device=device)
 
@@ -68,11 +68,11 @@ class FloMo(nn.Module):
         x_in = x
         if self.rel_coords:
             if self.encoding_type == "dev":
-                x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
+                x_in = x[:, :, 3:]
             elif self.encoding_type == "abs":
-                x_in = x[:, 1:]
+                x_in = x[:, :, :3]
             elif self.encoding_type == "absdev":
-                x_in = torch.cat((x[:, 1:], x[:, 1:] - x[:, :-1]), dim=2)
+                x_in = x
 
         # if self.rel_coords:
         #     x_in = x[:, 1:] - x[:, :-1]  # convert to relative coords
@@ -119,7 +119,7 @@ class FloMo(nn.Module):
         if self.norm_rotation:
             x, y_true, angle = self._normalize_rotation(x, y_true)
 
-        x_t = x[..., -1:, :]
+        x_t = x[..., -1:, :3]
         x_enc = self._encode_conditionals(x)  # history encoding
         y_rel = self._abs_to_rel(y_true, x_t)
         y_rel_flat = torch.flatten(y_rel, start_dim=1)
@@ -161,7 +161,7 @@ class FloMo(nn.Module):
             normal = Normal(0, 1, validate_args=True)
             log_probs = (normal.log_prob(z).sum(1) - log_det).view((x.size(0), -1))
 
-            x_t = x[..., -1:, :].unsqueeze(dim=1).repeat(1, n, 1, 1)
+            x_t = x[..., -1:, :3].unsqueeze(dim=1).repeat(1, n, 1, 1)
             samples_abs = self._rel_to_abs(samples_rel, x_t)
 
             # invert rotation normalization

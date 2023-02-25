@@ -90,7 +90,7 @@ max_z = 200
 
 test_data[:, :, 4][test_data[:, :, 4] < 5] = min_z
 test_data[:, :, 4][test_data[:, :, 4] > 200] = max_z
-test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=False)
+test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True)
 
 
 # define a min-max scaler
@@ -116,6 +116,12 @@ fig = plt.figure(figsize=(20, 20))
 
 norm_model.eval()
 
+if not os.path.exists(f"/app/logs/{model_dir}/fig"):
+    os.makedirs(f"/app/logs/{model_dir}/fig")
+
+
+N = 100
+
 with torch.no_grad():
     for i, data in (pbar := tqdm(enumerate(test_loader), total=test_loader.__len__())):
         data = data.to(device)
@@ -127,31 +133,15 @@ with torch.no_grad():
 
         nllloss = norm_model.log_prob(target, input)
 
-        samples, probs = norm_model.sample(n=1000, x=input)
+        samples_out, probs = norm_model.sample(n=1000, x=input)
 
         nllloss = -nllloss.mean()
         loss = nllloss
 
-        input = scaler.inverse_transform(input)
-        samples = scaler.inverse_transform(samples)
-        target = scaler.inverse_transform(target)
-
-        out_dict = {
-            "data": data.cpu().numpy(),
-            "input": input.cpu().numpy(),
-            "target": target.cpu().numpy(),
-            "samples": samples.cpu().numpy(),
-        }
-
-        if not os.path.exists(f"/app/logs/{model_dir}/result"):
-            os.makedirs(f"/app/logs/{model_dir}/result")
-
-        with open(f"/app/logs/{model_dir}/result/{i}.pkl", 'wb') as f:
-            pickle.dump(out_dict, f)
-
         for j in range(input.shape[0]):
-            samples, log_prob = norm_model.sample(n=100, x=input[j].unsqueeze(0))
+            samples, log_prob = norm_model.sample(n=N, x=input[j].unsqueeze(0))
             # sort by log_prob
+            log_prob, sorted_idx = torch.sort(log_prob, descending=True)
 
             input_i = scaler.inverse_transform(input[j].unsqueeze(0))
             target_i = scaler.inverse_transform(target[j].unsqueeze(0))
@@ -172,4 +162,22 @@ with torch.no_grad():
             ax.set_ylim([min_y, max_y])
             # ax.set_zlim([min_z, max_z])
 
-            ax.get_figure().savefig(f"{logdir}/fig/{epoch}/{i}_{j}.png")
+            ax.get_figure().savefig(f"/app/logs/{model_dir}/fig/{i}_{j}.png")
+
+        input_out = scaler.inverse_transform(input)
+        samples = scaler.inverse_transform(samples_out)
+        target = scaler.inverse_transform(target)
+
+        out_dict = {
+            "data": data.cpu().numpy(),
+            "input": input_out.cpu().numpy(),
+            "target": target.cpu().numpy(),
+            "samples": samples.cpu().numpy(),
+            "logprobs": probs.cpu().numpy()
+        }
+
+        if not os.path.exists(f"/app/logs/{model_dir}/result"):
+            os.makedirs(f"/app/logs/{model_dir}/result")
+
+        with open(f"/app/logs/{model_dir}/result/{i}.pkl", 'wb') as f:
+            pickle.dump(out_dict, f)

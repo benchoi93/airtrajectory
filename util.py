@@ -8,7 +8,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy.interpolate import interp1d
+import torch
 
+def get_dist(samples, target):
+        # calculate minADE
+    dlon = torch.deg2rad(samples[:, :, :, 0]) - torch.deg2rad(target[:, :, 0].unsqueeze(1))
+    dlat = torch.deg2rad(samples[:, :, :, 1]) - torch.deg2rad(target[:, :, 1].unsqueeze(1))
+
+    a = torch.sin(dlat / 2)**2 + torch.cos(torch.deg2rad(target[:, :, 1].unsqueeze(1))) * \
+        torch.cos(torch.deg2rad(samples[:, :, :, 1])) * torch.sin(dlon / 2)**2
+    c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
+
+    dist_xy = 6371 * c
+    dz = samples[:, :, :, 2] - target[:, :, 2].unsqueeze(1)
+    # dalt = dz * 1000 * 0.3048
+    dalt = dz *  0.3048
+
+    dist = torch.sqrt(dist_xy**2 + dalt**2)
+    return dist    
 
 class AirportTrajData(object):
     def __init__(self, path, num_in=60, num_out=60):

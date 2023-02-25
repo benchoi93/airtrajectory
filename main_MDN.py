@@ -197,7 +197,7 @@ for epoch in range(100):
             log_prob, sigma_reg = norm_model.log_prob(target, input)
 
             nllloss = -log_prob.mean()
-            loss = nllloss + sigma_reg
+            loss = nllloss + 0.01*sigma_reg
 
             losses += loss.item()
 
